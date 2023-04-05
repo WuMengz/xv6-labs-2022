@@ -1,0 +1,6 @@
+1. usertrap
+2. 7。a7 寄存器表示的是需要执行哪个系统调用。这里 7 指的是 exec 系统调用。
+3. 是 usermode，因为 SPP 位是 0。SPP 位是 0 表示之前的模式是 user mode，反之则不是。
+4. 0x0000000080001ff4。a3。
+5. 内核中的地址 0 未被内核页表映射到一个物理地址。因此对地址 0 的取值导致了一个无法解决的 load page fault 发生，进而发生了 pinic。发送 panic 时 scause 的值是 13，这在表中查询可得发生的错误是 load page fault。
+6. initcode。根据在 gdb 中输入 p p->pid 的结果来看，正在运行的进程的 pid 是 1。

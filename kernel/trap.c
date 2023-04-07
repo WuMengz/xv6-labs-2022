@@ -88,7 +88,7 @@ usertrap(void)
 
     p->ticks += 1;
 
-    if (p->ok && p->ticks >= p->interval) {
+    if (p->ok && p->ticks >= p->interval && p->interval) {
       p->ticks -= p->interval;
       p->tmp = *p->trapframe;
       p->ok = 0;

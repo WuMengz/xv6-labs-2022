@@ -7,6 +7,7 @@
 #include "defs.h"
 
 struct spinlock tickslock;
+
 uint ticks;
 
 extern char trampoline[], uservec[], userret[];
@@ -64,7 +65,13 @@ usertrap(void)
     // so enable only now that we're done with those registers.
     intr_on();
 
+    int isret = p->trapframe->a7 == 23;
+    int a0 = 0;
+    if (isret) a0 = p->tmp.a0;
+
     syscall();
+
+    if (isret) p->trapframe->a0 = a0;
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -77,8 +84,18 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2) {
+
+    p->ticks += 1;
+
+    if (p->ok && p->ticks >= p->interval) {
+      p->ticks -= p->interval;
+      p->tmp = *p->trapframe;
+      p->ok = 0;
+      p->trapframe->epc = (long unsigned)p->fn;
+    }
     yield();
+  }
 
   usertrapret();
 }

@@ -308,28 +308,37 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
+    acquire(&ptelock);
+    if (*pte & PTE_W) {
+      *pte &= ~PTE_W;
+      *pte |= PTE_C;
+    }
     flags = PTE_FLAGS(*pte);
+    pa = PTE2PA(*pte);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      release(&ptelock);
+      uvmunmap(new, 0, i / PGSIZE, 1);
+      return -1;
+    }
+    add_refcnt(pa);
+    release(&ptelock);
+    /*
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
-    }
+    */
   }
   return 0;
 
- err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
+ /*err:
+  return -1;*/
 }
 
 // mark a PTE invalid for user access.
@@ -345,6 +354,39 @@ uvmclear(pagetable_t pagetable, uint64 va)
   *pte &= ~PTE_U;
 }
 
+int
+copyout_pagefault(pagetable_t tb, uint64 addr) {
+  if (addr >= MAXVA)
+    return -1;
+  pte_t* pte = walk(tb, addr, 0);
+  acquire(&ptelock);
+  if (pte == 0 || (*pte & (PTE_C | PTE_W)) == 0) {
+    release(&ptelock);
+    return -1;
+  }
+  if (*pte & PTE_W) ;
+  else {
+    uint64 pa = PTE2PA(*pte);
+    if (query_refcnt(pa) == 1) {
+      *pte &= ~PTE_C;
+      *pte |= PTE_W;
+    } else {
+      uint flags = (PTE_FLAGS(*pte) | PTE_W) & (~PTE_C);
+      char* mem = kalloc();
+      if (mem == 0) {
+        release(&ptelock);
+        return -1;
+      }
+      memmove(mem, (char*)pa, PGSIZE);
+      *pte = flags | PA2PTE((uint64)mem);
+      add_refcnt((uint64)mem);
+      sub_refcnt(pa);
+    }
+  }
+  release(&ptelock);
+  return 0;
+}
+
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
@@ -355,6 +397,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    if (copyout_pagefault(pagetable, va0) < 0)
+      return -1;
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;

@@ -23,11 +23,41 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct spinlock reflock, ptelock;
+int ref_cnt[PHYSTOP >> PGSHIFT];
+
 void
 kinit()
 {
+  initlock(&reflock, "refcnt");
+  initlock(&ptelock, "pte");
+  for (int i = 0; i < (PHYSTOP >> PGSHIFT); ++i)
+    ref_cnt[i] = 1;
   initlock(&kmem.lock, "kmem");
   freerange(end, (void*)PHYSTOP);
+}
+
+void
+add_refcnt(uint64 addr) {
+  if (addr >= PHYSTOP)
+    panic("add_refcnt: unknown address!");
+  acquire(&reflock);
+  ++ref_cnt[addr >> PGSHIFT];
+  release(&reflock);
+}
+
+void
+sub_refcnt(uint64 addr) {
+  if (addr >= PHYSTOP)
+    panic("sub_refcnt: unknown address!");
+  acquire(&reflock);
+  --ref_cnt[addr >> PGSHIFT];
+  release(&reflock);
+}
+
+int
+query_refcnt(uint64 addr) {
+  return ref_cnt[addr >> PGSHIFT];
 }
 
 void
@@ -52,14 +82,19 @@ kfree(void *pa)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
+  acquire(&ptelock);
+  sub_refcnt((uint64)pa);
+  if (query_refcnt((uint64)pa) == 0) {
+    memset(pa, 1, PGSIZE);
 
-  r = (struct run*)pa;
+    r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+    acquire(&kmem.lock);
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+    release(&kmem.lock);
+  }
+  release(&ptelock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -76,7 +111,11 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r) {
     memset((char*)r, 5, PGSIZE); // fill with junk
+    if (query_refcnt((uint64)r) != 0)
+      panic("kalloc: refcnt failed.\n");
+    add_refcnt((uint64)r);
+  }
   return (void*)r;
 }

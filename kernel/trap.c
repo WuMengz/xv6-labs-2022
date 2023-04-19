@@ -65,6 +65,48 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if (r_scause() == 15) {
+    // store page fault
+    // todo: page fault at the same time
+    uint64 addr = r_stval();
+    if (addr >= MAXVA) {
+      printf("usertrap: store page fault, address >= MAXVA.\n");
+      setkilled(p);
+      goto ed;
+    }
+    pagetable_t tb = p->pagetable;
+    pte_t* pte = walk(tb, addr, 0);
+    acquire(&ptelock);
+    if (pte == 0 || (*pte & (PTE_C | PTE_W)) == 0) {
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      release(&ptelock);
+      setkilled(p);
+      goto ed;
+    }
+    if (*pte & PTE_W) ;
+    else {
+      uint64 pa = PTE2PA(*pte);
+      if (query_refcnt(pa) == 1) {
+        *pte &= ~PTE_C;
+        *pte |= PTE_W;
+      } else {
+        uint flags = (PTE_FLAGS(*pte) | PTE_W) & (~PTE_C);
+        char* mem = kalloc();
+        if (mem == 0) {
+          release(&ptelock);
+          printf("usertrap: not enough memory.\n");
+          setkilled(p);
+          goto ed;
+        }
+        memmove(mem, (char*)pa, PGSIZE);
+        *pte = flags | PA2PTE((uint64)mem);
+        // add_refcnt((uint64)mem);
+        sub_refcnt(pa);
+      }
+    }
+    release(&ptelock);
+    ed:;
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

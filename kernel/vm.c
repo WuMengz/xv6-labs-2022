@@ -379,7 +379,7 @@ copyout_pagefault(pagetable_t tb, uint64 addr) {
       }
       memmove(mem, (char*)pa, PGSIZE);
       *pte = flags | PA2PTE((uint64)mem);
-      add_refcnt((uint64)mem);
+      // add_refcnt((uint64)mem);
       sub_refcnt(pa);
     }
   }

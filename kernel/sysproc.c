@@ -75,6 +75,39 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  printf("pgaccess!\n");
+  uint64 addr;
+  int n;
+  uint64 bitva;
+  struct proc *p = myproc();
+  
+  argaddr(0, &addr);
+  argint(1, &n);
+  argaddr(2, &bitva);
+
+  uint64 *bit = kalloc();
+  if (bit == 0)
+    return -1;
+  memset(bit, 0, PGSIZE);
+  
+  for (int i = 0; i < n; ++i) {
+    pte_t* pte = walk(p->pagetable, addr, 0);
+    if (pte == 0) {
+      kfree(bit);
+      return -1;
+    }
+    addr += PGSIZE;
+    if (*pte & PTE_A)
+      bit[i >> 6] |= 1ul << (i & 63);
+    *pte &= ~PTE_A;
+  }
+
+  if (copyout(p->pagetable, bitva, (char*)bit, (n + 7) >> 3) < 0) {
+    kfree(bit);
+    return -1;
+  }
+  
+  kfree(bit);
   return 0;
 }
 #endif

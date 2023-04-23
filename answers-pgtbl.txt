@@ -1,0 +1,4 @@
+1. 通过与 ugetpid 类似的方法，可以用 USYSCALL 页实现 uptime。 
+2. page0 是 text 段， page1 是 data 段，page3 是 stack 段，page2 是这个 stack 的 guard 段。
+   可以，page1 是 data 段，可以看到 V R W U 位均为 1。
+   是我们在进程初始化时分配的三个页，分别是 USYSCALL, TRAPFRAME, TRAMPOLINE
